@@ -1,3 +1,4 @@
 .claude/
 *-output.json
 *-import.json
+run.sh
