@@ -24,6 +24,10 @@ jobs:
             Write-Host "Running: $($script.Name)"
             & $script.FullName
           }
+      - name: Generate version file
+        run: |
+          echo "Generating version file..."
+          echo "VERSION=$(date +%Y.%m.%d.%H%M%S)" > version.txt
 
       - name: Commit and push generated files
         run: |
