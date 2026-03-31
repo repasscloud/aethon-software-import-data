@@ -40,7 +40,7 @@ jobs:
       - name: Import jobs via API
         env:
           API_HOST: ${{ secrets.API_HOST }}
-          IMPORT_API_KEY: ${{ secrets.IMPORT_JOBS_API_KEY }}
+          IMPORT_API_KEY: ${{ secrets.IMPORT_API_KEY }}
         run: |
           chmod +x import-jobs.sh
           for f in *-import.json; do
