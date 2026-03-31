@@ -485,6 +485,7 @@ catch {
 Write-Host "Saved transformed import JSON to: $OutputPath"
 Write-Host "Transformed job count: $(@($transformed).Count)"
 
+# Download company logos and save to local paths, while preserving directory structure
 if (-not (Test-Path -LiteralPath $OutputPath)) {
     throw "Input file not found: $OutputPath"
 }
@@ -541,3 +542,19 @@ foreach ($job in $jobs) {
         Write-Host "Already exists, skipping: $destinationPath"
     }
 }
+
+# Replace URL string for logos in the JSON with the relative path
+if (-not (Test-Path -LiteralPath $OutputPath)) {
+    throw "File not found: $OutputPath"
+}
+
+# Read the file as raw text so formatting is preserved as much as possible
+$content = Get-Content -LiteralPath $OutputPath -Raw
+
+# Replace only the companyLogoUrl prefix
+$content = $content -replace `
+    '(?m)^(\s*"companyLogoUrl"\s*:\s*")https://', `
+    '${1}https://raw.githubusercontent.com/repasscloud/aethon-software-import-data/refs/heads/main/'
+
+# Save back to the same file
+Set-Content -LiteralPath $OutputPath -Value $content -Encoding utf8
