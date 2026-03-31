@@ -34,7 +34,7 @@ while [[ "$OFFSET" -lt "$TOTAL" ]]; do
   COUNT=$((ACTUAL_END - OFFSET))
 
   echo ""
-  echo "--- Batch $BATCH_NUM: records $OFFSET–$((ACTUAL_END - 1)) ($COUNT jobs) ---"
+  echo "--- Batch $BATCH_NUM: records $OFFSET-$((ACTUAL_END - 1)) ($COUNT jobs) ---"
 
   HTTP_STATUS=$(
     jq ".[$OFFSET:$ACTUAL_END]" "$INPUT_FILE" \
