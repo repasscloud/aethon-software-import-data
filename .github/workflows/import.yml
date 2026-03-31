@@ -1,0 +1,49 @@
+name: Import Jobs
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run PowerShell scripts
+        shell: pwsh
+        run: |
+          $scripts = Get-ChildItem -Path . -Filter '*.ps1' -File
+          foreach ($script in $scripts) {
+            Write-Host "Running: $($script.Name)"
+            & $script.FullName
+          }
+
+      - name: Commit and push generated files
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update import data [skip ci]"
+            git push origin main
+          fi
+
+      - name: Import jobs via API
+        env:
+          API_HOST: ${{ secrets.API_HOST }}
+          IMPORT_API_KEY: ${{ secrets.IMPORT_JOBS_API_KEY }}
+        run: |
+          chmod +x import-jobs.sh
+          for f in *-import.json; do
+            echo "Importing: $f"
+            INPUT_FILE="$f" ./import-jobs.sh "$f"
+          done
