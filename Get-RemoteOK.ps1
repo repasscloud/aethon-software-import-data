@@ -593,7 +593,10 @@ $transformed = foreach ($job in $jobs) {
 
     $title = Normalize-String (Get-ObjectPropertyValue -InputObject $job -PropertyName "position")
 
-    [PSCustomObject]@{
+    $countriesList = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($locationCountry)) { $countriesList.Add($locationCountry) }
+
+    $jobObj = [PSCustomObject]@{
         sourceSite             = "remoteok.com"
         externalId             = Normalize-String (Get-ObjectPropertyValue -InputObject $job -PropertyName "id")
         companyName            = Normalize-String (Get-ObjectPropertyValue -InputObject $job -PropertyName "company")
@@ -609,7 +612,7 @@ $transformed = foreach ($job in $jobs) {
         category               = Get-Category -Tags $tags -Title $title -DescriptionPlain $descriptionPlain
         keywords               = if ($tags.Count -gt 0) { $tags -join ',' } else { $null }
         regions                = @($regions)
-        countries              = if ($locationCountry) { @($locationCountry) } else { @() }
+        countries              = $countriesList
 
         summary                = Get-PlainTextSummary -Description $descriptionHtml -MaxLength 100
         requirements           = $null
@@ -633,6 +636,14 @@ $transformed = foreach ($job in $jobs) {
 
         slug                   = Normalize-String (Get-ObjectPropertyValue -InputObject $job -PropertyName "slug")
     }
+
+    # employmentType is a non-nullable enum in the import API — omit the property
+    # entirely when unknown so the API uses its default rather than rejecting with 400.
+    if ($null -eq $jobObj.employmentType) {
+        $jobObj.PSObject.Properties.Remove('employmentType')
+    }
+
+    $jobObj
 }
 
 $directory = Split-Path -Path $OutputPath -Parent
