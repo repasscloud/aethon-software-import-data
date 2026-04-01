@@ -607,7 +607,7 @@ $transformed = foreach ($job in $jobs) {
         externalApplicationUrl = Get-SafeUrl -Job $job
 
         category               = Get-Category -Tags $tags -Title $title -DescriptionPlain $descriptionPlain
-        keywords               = @($tags)
+        keywords               = if ($tags.Count -gt 0) { $tags -join ',' } else { $null }
         regions                = @($regions)
         countries              = if ($locationCountry) { @($locationCountry) } else { @() }
 
