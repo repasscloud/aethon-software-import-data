@@ -397,6 +397,109 @@ function Convert-SafeDecimal {
     }
 }
 
+function Repair-C1Mojibake {
+    <#
+    .SYNOPSIS
+        Fixes mojibake sequences that contain C1 control characters (U+0080-U+009F).
+
+    .DESCRIPTION
+        C1 controls have zero legitimate use in text or HTML.  Their only appearance
+        is as the "continuation bytes" of a multi-byte UTF-8 sequence that was
+        misread byte-by-byte as individual Latin-1 characters.
+
+        The scanner walks the string looking for a Latin-1 leading byte
+        (U+00C2-U+00EF) followed by one or two continuation bytes (U+0080-U+00BF)
+        where at least one continuation byte is in the C1 range (U+0080-U+009F).
+        When found and the bytes form valid UTF-8, the sequence is replaced with
+        the decoded Unicode character.
+
+        Everything else — em/en dashes, curly quotes, emoji, accented letters,
+        ®, €, →, etc. — is left completely untouched.
+
+        Example:  â + U+0080 + U+0099  →  ' (U+2019 RIGHT SINGLE QUOTATION MARK)
+    #>
+    param([AllowNull()][string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+
+    # Fast exit: skip entirely when no C1 controls are present
+    $hasC1 = $false
+    foreach ($ch in $Text.ToCharArray()) {
+        $cp = [int]$ch
+        if ($cp -ge 0x80 -and $cp -le 0x9F) { $hasC1 = $true; break }
+    }
+    if (-not $hasC1) { return $Text }
+
+    $strict = [System.Text.UTF8Encoding]::new($false, $true)
+    $sb     = [System.Text.StringBuilder]::new($Text.Length)
+    $i      = 0
+
+    while ($i -lt $Text.Length) {
+        $cp = [int]$Text[$i]
+
+        # Potential leading byte of a 2- or 3-byte UTF-8 sequence
+        if ($cp -ge 0xC2 -and $cp -le 0xEF) {
+            $seqLen = if ($cp -le 0xDF) { 2 } else { 3 }
+
+            if (($i + $seqLen - 1) -lt $Text.Length) {
+                $allCont  = $true
+                $hasC1Seq = $false
+                for ($j = 1; $j -lt $seqLen; $j++) {
+                    $nc = [int]$Text[$i + $j]
+                    if ($nc -lt 0x80 -or $nc -gt 0xBF) { $allCont = $false; break }
+                    if ($nc -le 0x9F) { $hasC1Seq = $true }
+                }
+
+                if ($allCont -and $hasC1Seq) {
+                    $bytes = [byte[]]::new($seqLen)
+                    for ($j = 0; $j -lt $seqLen; $j++) { $bytes[$j] = [byte][int]$Text[$i + $j] }
+                    try {
+                        [void]$sb.Append($strict.GetString($bytes))
+                        $i += $seqLen
+                        continue
+                    } catch { }
+                }
+            }
+        }
+
+        [void]$sb.Append($Text[$i])
+        $i++
+    }
+
+    return $sb.ToString()
+}
+
+function Normalize-Unicode {
+    <#
+    .SYNOPSIS
+        Repairs mojibake and normalises problematic Unicode characters to clean equivalents.
+        Legitimate characters (em/en dashes, curly quotes, accented letters, emoji, etc.) are preserved.
+    #>
+    param([AllowNull()][string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+
+    $t = Repair-C1Mojibake $Text
+
+    # Non-breaking / narrow no-break spaces → regular space
+    $t = $t -replace '\u00A0|\u202F', ' '
+
+    # Invisible formatting characters → remove
+    $t = $t -replace '\u00AD', ''   # soft hyphen
+    $t = $t -replace '\u200B', ''   # zero-width space
+    $t = $t -replace '\u200D', ''   # zero-width joiner
+
+    # Non-breaking hyphen → regular hyphen
+    $t = $t -replace '\u2011', '-'
+
+    # Typography ligatures → expanded equivalents
+    $t = $t -replace '\uFB01', 'fi'
+    $t = $t -replace '\uFB03', 'ffi'
+
+    # Greek question mark (looks like semicolon) → ASCII question mark
+    $t = $t -replace '\u037E', '?'
+
+    return $t
+}
+
 Write-Host "Fetching Jobicy jobs from $ApiUrl"
 try {
     $data = Invoke-RestMethod -Uri $ApiUrl -Method Get
@@ -415,6 +518,28 @@ if ($jobs.Count -eq 0) {
     throw "The API response did not contain any jobs."
 }
 
+function Normalize-SingleLine {
+    <#
+    .SYNOPSIS
+        Strips newlines and collapses runs of whitespace to a single space.
+        Returns $null for blank/null input.  Safe for all single-line fields.
+    #>
+    param(
+        [AllowNull()]
+        [object]$Value
+    )
+
+    if ($null -eq $Value) { return $null }
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+
+    $text = [System.Net.WebUtility]::HtmlDecode($text)  # &#8217; → ' etc.
+    $text = Normalize-Unicode $text                     # mojibake, NBSP, ligatures, etc.
+    $text = $text -replace '[\r\n]+', ' '               # newlines → space
+    $text = $text -replace '\s{2,}', ' '                # collapse runs of whitespace
+    return $text.Trim()
+}
+
 $transformed = foreach ($job in $jobs) {
     $jobGeo = Get-ObjectPropertyValue -InputObject $job -PropertyName "jobGeo"
     $jobIndustry = Get-ObjectPropertyValue -InputObject $job -PropertyName "jobIndustry"
@@ -429,11 +554,11 @@ $transformed = foreach ($job in $jobs) {
     [PSCustomObject]@{
         sourceSite             = "jobicy.com"
         externalId             = [string](Get-ObjectPropertyValue -InputObject $job -PropertyName "id")
-        companyName            = Get-ObjectPropertyValue -InputObject $job -PropertyName "companyName"
+        companyName            = Normalize-SingleLine (Get-ObjectPropertyValue -InputObject $job -PropertyName "companyName")
         companyLogoUrl         = Get-ObjectPropertyValue -InputObject $job -PropertyName "companyLogo"
 
-        title                  = Get-ObjectPropertyValue -InputObject $job -PropertyName "jobTitle"
-        description            = Get-ObjectPropertyValue -InputObject $job -PropertyName "jobDescription"
+        title                  = Normalize-SingleLine (Get-ObjectPropertyValue -InputObject $job -PropertyName "jobTitle")
+        description            = (Normalize-Unicode (Get-ObjectPropertyValue -InputObject $job -PropertyName "jobDescription") -replace '[\r\n]+', ' ')
         workplaceType          = "Remote"
         employmentType         = $employmentType
 
@@ -444,7 +569,7 @@ $transformed = foreach ($job in $jobs) {
         regions                = @($regions)
         countries              = @($countries)
 
-        summary                = Get-ObjectPropertyValue -InputObject $job -PropertyName "jobExcerpt"
+        summary                = Normalize-SingleLine (Get-ObjectPropertyValue -InputObject $job -PropertyName "jobExcerpt")
         requirements           = $null
         benefits               = $null
         department             = $null
@@ -456,7 +581,7 @@ $transformed = foreach ($job in $jobs) {
         publishedUtc           = Convert-ToUtcIsoString -Value (Get-ObjectPropertyValue -InputObject $job -PropertyName "pubDate")
         postingExpiresUtc      = $null
 
-        locationText           = $jobGeo
+        locationText           = Normalize-SingleLine $jobGeo
         locationCity           = $null
         locationState          = $null
         locationCountry        = if ($countries.Count -eq 1) { $countries[0] } else { $null }
@@ -464,7 +589,7 @@ $transformed = foreach ($job in $jobs) {
         locationLatitude       = $null
         locationLongitude      = $null
 
-        slug                   = Get-ObjectPropertyValue -InputObject $job -PropertyName "jobSlug"
+        slug                   = Normalize-SingleLine (Get-ObjectPropertyValue -InputObject $job -PropertyName "jobSlug")
     }
 }
 

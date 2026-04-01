@@ -138,6 +138,44 @@ function Normalize-ToArray {
     return @($Value)
 }
 
+function Repair-Encoding {
+    <#
+    .SYNOPSIS
+        Fixes mojibake produced when UTF-8 bytes were stored/served as if they were
+        Latin-1 characters (a common RemoteOK API issue).
+
+    .DESCRIPTION
+        Treats each character as a raw Latin-1 byte, then re-decodes the resulting
+        byte array as strict UTF-8.  If the byte sequence is not valid UTF-8 the
+        original string is returned unchanged, so pure-ASCII and genuinely Latin-1
+        content is always safe.
+
+        Examples of what this repairs:
+          â€" (E2 80 94 as Latin-1 chars)  →  — (U+2014 em dash)
+          â€™ (E2 80 99)                   →  ' (U+2019 right single quote)
+          Â®  (C2 AE)                       →  ® (U+00AE registered sign)
+    #>
+    param(
+        [AllowNull()]
+        [string]$Text
+    )
+
+    if ([string]::IsNullOrEmpty($Text)) {
+        return $Text
+    }
+
+    $bytes = [System.Text.Encoding]::Latin1.GetBytes($Text)
+    try {
+        $strict   = [System.Text.UTF8Encoding]::new($false, $true)  # throwOnInvalidBytes = true
+        $repaired = $strict.GetString($bytes)
+        return $repaired
+    }
+    catch {
+        # Byte sequence is not valid UTF-8 — content is genuinely ASCII/Latin-1.
+        return $Text
+    }
+}
+
 function Normalize-String {
     param(
         [AllowNull()]
@@ -153,7 +191,7 @@ function Normalize-String {
         return $null
     }
 
-    return $text.Trim()
+    return Repair-Encoding $text.Trim()
 }
 
 function Normalize-CountryName {
@@ -218,6 +256,10 @@ function Get-PlainTextSummary {
     if ([string]::IsNullOrWhiteSpace($plain)) {
         return $null
     }
+
+    # Summary is a single-line field — collapse newlines and excess whitespace to spaces.
+    $plain = $plain -replace '[\r\n]+', ' ' -replace '\s{2,}', ' '
+    $plain = $plain.Trim()
 
     if ($plain.Length -le $MaxLength) {
         return $plain
@@ -538,6 +580,52 @@ function Get-Category {
     }
 }
 
+function Get-CompanyLogoUrl {
+    <#
+    .SYNOPSIS
+        Scrapes the RemoteOK job page for the company logo URL.
+
+    .DESCRIPTION
+        The RemoteOK API does not expose a logo field, but each job page contains
+        an <img> element like:
+
+            data-src="https://resizeapi.com/resize-cgi/image/format=auto,...,quality=80/
+                      https://r2.remoteok.com/jobs/<hash>.png" class="logo"
+
+        This function fetches the page, extracts the actual logo URL that follows the
+        resize-API prefix, and returns it.  Returns $null on any error or if the
+        element is not found.
+    #>
+    param(
+        [AllowNull()]
+        [string]$JobPageUrl
+    )
+
+    if ([string]::IsNullOrWhiteSpace($JobPageUrl)) { return $null }
+
+    try {
+        $response = Invoke-WebRequest -Uri $JobPageUrl -UseBasicParsing -TimeoutSec 15 `
+            -Headers @{ 'User-Agent' = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' }
+
+        $html = [System.Text.Encoding]::UTF8.GetString($response.RawContentStream.ToArray())
+
+        # Match the actual logo URL embedded inside the resize-API wrapper.
+        # Pattern: data-src="https://resizeapi.com/.../{LOGO_URL}" ... class="logo"
+        $m = [regex]::Match(
+            $html,
+            'data-src="https?://resizeapi\.com/[^"]*/(https?://[^"]+)"[^>]*class="logo"'
+        )
+        if ($m.Success) {
+            return $m.Groups[1].Value.Trim()
+        }
+    }
+    catch {
+        # Logo is optional — ignore all errors silently
+    }
+
+    return $null
+}
+
 function Get-SafeUrl {
     param(
         [Parameter(Mandatory)]
@@ -555,7 +643,13 @@ function Get-SafeUrl {
 Write-Host "Fetching Remote OK jobs from $ApiUrl"
 
 try {
-    $response = Invoke-RestMethod -Uri $ApiUrl -Method Get
+    # Invoke-RestMethod can fall back to ISO-8859-1 when the server omits a charset
+    # in its Content-Type header, which turns multi-byte UTF-8 characters (em dashes,
+    # curly quotes, ® etc.) into mojibake.  Read the raw bytes and force UTF-8 decoding.
+    $webResponse  = Invoke-WebRequest -Uri $ApiUrl -Method Get -UseBasicParsing `
+        -Headers @{ 'User-Agent' = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' }
+    $responseText = [System.Text.Encoding]::UTF8.GetString($webResponse.RawContentStream.ToArray())
+    $response     = $responseText | ConvertFrom-Json
 }
 catch {
     throw "Failed to fetch jobs from '$ApiUrl': $_"
@@ -596,11 +690,17 @@ $transformed = foreach ($job in $jobs) {
     $countriesList = New-Object System.Collections.Generic.List[string]
     if (-not [string]::IsNullOrWhiteSpace($locationCountry)) { $countriesList.Add($locationCountry) }
 
+    # The API never populates company_logo, so scrape the logo from the job page.
+    # Always use the remoteok.com `url` field — apply_url may point to an external site.
+    $jobPageUrl    = Normalize-String (Get-ObjectPropertyValue -InputObject $job -PropertyName "url")
+    $companyLogo   = Get-CompanyLogoUrl -JobPageUrl $jobPageUrl
+    Write-Host "  Logo for '$( Normalize-String (Get-ObjectPropertyValue -InputObject $job -PropertyName "company") )': $( if ($companyLogo) { $companyLogo } else { '(none)' } )"
+
     $jobObj = [PSCustomObject]@{
         sourceSite             = "remoteok.com"
         externalId             = Normalize-String (Get-ObjectPropertyValue -InputObject $job -PropertyName "id")
         companyName            = Normalize-String (Get-ObjectPropertyValue -InputObject $job -PropertyName "company")
-        companyLogoUrl         = Normalize-String (Get-ObjectPropertyValue -InputObject $job -PropertyName "company_logo")
+        companyLogoUrl         = $companyLogo
 
         title                  = $title
         description            = $descriptionHtml
@@ -663,3 +763,76 @@ catch {
 
 Write-Host "Saved transformed import JSON to: $OutputPath"
 Write-Host "Transformed job count: $(@($transformed).Count)"
+
+# ---------------------------------------------------------------------------
+# Phase 2: Download company logos and rewrite companyLogoUrl to GitHub raw URLs
+# ---------------------------------------------------------------------------
+
+$logoLocalRoot  = Join-Path -Path $PSScriptRoot -ChildPath "remoteok.com"
+$githubRawBase  = "https://raw.githubusercontent.com/repasscloud/aethon-software-import-data/refs/heads/main/remoteok.com"
+
+if (-not (Test-Path $logoLocalRoot)) {
+    New-Item -ItemType Directory -Path $logoLocalRoot -Force | Out-Null
+}
+
+Write-Host ""
+Write-Host "Downloading company logos..."
+
+# Re-read the JSON we just wrote so we work with the serialized form
+$importData = Get-Content -Path $OutputPath -Raw -Encoding UTF8 | ConvertFrom-Json
+
+$anyUpdated = $false
+
+foreach ($item in $importData) {
+    $logoUrl = $item.companyLogoUrl
+    if ([string]::IsNullOrWhiteSpace($logoUrl)) { continue }
+
+    # Derive the path component (e.g. /jobs/abc.jpg) from whatever URL was scraped
+    try { $uri = [System.Uri]$logoUrl } catch { continue }
+    $relativePath = $uri.AbsolutePath          # always starts with /
+    $relativePathClean = $relativePath.TrimStart('/')   # jobs/abc.jpg
+
+    # Build local file path
+    $localPath = Join-Path -Path $logoLocalRoot -ChildPath $relativePathClean
+
+    # Ensure sub-directory exists
+    $localDir = Split-Path -Path $localPath -Parent
+    if (-not (Test-Path $localDir)) {
+        New-Item -ItemType Directory -Path $localDir -Force | Out-Null
+    }
+
+    # Download only if not already cached
+    if (-not (Test-Path $localPath)) {
+        try {
+            Invoke-WebRequest -Uri $logoUrl -OutFile $localPath -UseBasicParsing -TimeoutSec 30 `
+                -Headers @{ 'User-Agent' = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36' }
+            Write-Host "  Downloaded : $relativePathClean"
+        }
+        catch {
+            Write-Warning "  Failed to download logo '$logoUrl': $_"
+            continue   # leave the original URL intact if download failed
+        }
+    }
+    else {
+        Write-Host "  Cached      : $relativePathClean"
+    }
+
+    # Rewrite the URL in the in-memory object
+    $item.companyLogoUrl = "$githubRawBase/$relativePathClean"
+    $anyUpdated = $true
+}
+
+if ($anyUpdated) {
+    $updatedJson = @($importData) | ConvertTo-Json -Depth 20
+    try {
+        $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+        [System.IO.File]::WriteAllText($OutputPath, $updatedJson, $utf8NoBom)
+        Write-Host "Updated companyLogoUrl entries rewritten to GitHub raw URLs."
+    }
+    catch {
+        throw "Failed to write updated JSON to '$OutputPath': $_"
+    }
+}
+else {
+    Write-Host "No logo URLs required updating."
+}
