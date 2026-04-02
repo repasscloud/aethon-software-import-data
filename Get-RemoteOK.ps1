@@ -703,7 +703,7 @@ $transformed = foreach ($job in $jobs) {
         companyLogoUrl         = $companyLogo
 
         title                  = $title
-        description            = $descriptionHtml
+        description            = if ($null -ne $descriptionHtml) { $descriptionHtml -replace '[\r\n]+', ' ' } else { $null }
         workplaceType          = "Remote"
         employmentType         = Get-EmploymentType -Tags $tags -Title $title -DescriptionPlain $descriptionPlain
 
