@@ -1,22 +1,43 @@
 $url = "https://jooble.org/api/"
 $key = $env:JOOBLE_API_KEY
 
+if ([string]::IsNullOrWhiteSpace($key)) {
+    throw "JOOBLE_API_KEY is missing."
+}
+
+$body = '{"location":"City of Sydney, NSW"}'
+$bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
 
 $request = [System.Net.HttpWebRequest]::Create($url + $key)
 $request.Method = "POST"
-$request.ContentType = "application/json"
+$request.ContentType = "application/json; charset=utf-8"
+$request.Accept = "application/json"
+$request.ContentLength = $bytes.Length
 
-$writer = [System.IO.StreamWriter]::new($request.GetRequestStream())
-$writer.Write('{"location":"City of Sydney, NSW"}')
-$writer.Close()
+$stream = $request.GetRequestStream()
+$stream.Write($bytes, 0, $bytes.Length)
+$stream.Close()
 
-$response = $request.GetResponse()
-$reader = [System.IO.StreamReader]::new($response.GetResponseStream())
-
-while (-not $reader.EndOfStream)
-{
-    Write-Output $reader.ReadLine()
+try {
+    $response = $request.GetResponse()
+    $reader = [System.IO.StreamReader]::new($response.GetResponseStream())
+    $content = $reader.ReadToEnd()
+    Write-Output $content
+    $reader.Close()
+    $response.Close()
 }
+catch [System.Net.WebException] {
+    $exception = $_.Exception
 
-$reader.Close()
-$response.Close()
+    if ($exception.Response) {
+        $errorResponse = $exception.Response
+        $errorReader = [System.IO.StreamReader]::new($errorResponse.GetResponseStream())
+        $errorBody = $errorReader.ReadToEnd()
+        $errorReader.Close()
+        $errorResponse.Close()
+
+        throw "Jooble request failed: $errorBody"
+    }
+
+    throw
+}
