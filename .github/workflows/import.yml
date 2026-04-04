@@ -18,6 +18,8 @@ jobs:
 
       - name: Run PowerShell scripts
         shell: pwsh
+        env:
+          JOOBLE_API_KEY: ${{ secrets.JOOBLE_API_KEY }}
         run: |
           $scripts = Get-ChildItem -Path . -Filter '*.ps1' -File
           foreach ($script in $scripts) {
