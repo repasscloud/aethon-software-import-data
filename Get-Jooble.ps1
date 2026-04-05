@@ -438,8 +438,8 @@ function Build-Description {
         return "<p>Please visit the application URL for full job details.</p>"
     }
 
-    # Snippet is already HTML from Jooble — wrap in a div if it isn't already
-    $html = $Snippet.Trim()
+    # Snippet is already HTML from Jooble — strip any embedded newlines before wrapping
+    $html = $Snippet.Trim() -replace '[\r\n]+', ' '
     if ($html -notmatch '(?i)^<(p|div|ul|ol|h[1-6])') {
         $html = "<p>$html</p>"
     }

@@ -525,7 +525,7 @@ if (-not [string]::IsNullOrWhiteSpace($directory) -and -not (Test-Path $director
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
 }
 
-$jsonContent = @($transformed) | ConvertTo-Json -Depth 20
+$jsonContent = ConvertTo-Json -InputObject @($transformed) -Depth 20 -AsArray
 
 try {
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
@@ -765,7 +765,7 @@ foreach ($name in $uniqueCompanies) {
 
 # Write the updated JSON back if any logo URLs changed
 if ($anyJsonUpdated) {
-    $updatedJson = @($importData) | ConvertTo-Json -Depth 20
+    $updatedJson = ConvertTo-Json -InputObject @($importData) -Depth 20 -AsArray
     [System.IO.File]::WriteAllText($OutputPath, $updatedJson, $utf8NoBom)
     Write-Host "JSON updated with resolved logo URLs."
 } else {

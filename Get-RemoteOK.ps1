@@ -760,7 +760,7 @@ if (-not [string]::IsNullOrWhiteSpace($directory) -and -not (Test-Path $director
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
 }
 
-$jsonContent = @($transformed) | ConvertTo-Json -Depth 20
+$jsonContent = ConvertTo-Json -InputObject @($transformed) -Depth 20 -AsArray
 
 try {
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
@@ -832,7 +832,7 @@ foreach ($item in $importData) {
 }
 
 if ($anyUpdated) {
-    $updatedJson = @($importData) | ConvertTo-Json -Depth 20
+    $updatedJson = ConvertTo-Json -InputObject @($importData) -Depth 20 -AsArray
     try {
         $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
         [System.IO.File]::WriteAllText($OutputPath, $updatedJson, $utf8NoBom)

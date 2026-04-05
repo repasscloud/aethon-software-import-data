@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-# Configuration — edit these or pass as env vars before running
+# Configuration — pass as env vars or edit defaults below
 # ---------------------------------------------------------------------------
 API_HOST="${API_HOST:-}"
 IMPORT_API_KEY="${IMPORT_API_KEY:-}"
@@ -15,7 +15,15 @@ if [[ ! -f "$INPUT_FILE" ]]; then
   exit 1
 fi
 
+# Validate the file is a non-empty JSON array before doing anything
+FILE_TYPE=$(jq -r 'type' "$INPUT_FILE" 2>/dev/null || echo "invalid")
+if [[ "$FILE_TYPE" != "array" ]]; then
+  echo "ERROR: $INPUT_FILE is not a JSON array (got: $FILE_TYPE)" >&2
+  exit 1
+fi
+
 TOTAL=$(jq 'length' "$INPUT_FILE")
+
 echo "========================================"
 echo "  Importing: $INPUT_FILE"
 echo "  Records:   $TOTAL"
@@ -49,9 +57,19 @@ while [[ "$OFFSET" -lt "$TOTAL" ]]; do
   )
 
   if [[ "$HTTP_STATUS" -eq 200 ]]; then
-    IMPORTED=$(jq '[.[] | select(.wasDuplicate == false)] | length' /tmp/import_response.json)
-    DUPES=$(jq '[.[] | select(.wasDuplicate == true)] | length' /tmp/import_response.json)
-    echo "  OK — imported: $IMPORTED, duplicates skipped: $DUPES"
+    # Response is always BulkImportResponseDto — no type-checking needed
+    IMPORTED=$(jq '.imported' /tmp/import_response.json)
+    UPDATED=$(jq  '.updated'  /tmp/import_response.json)
+    SKIPPED=$(jq  '.skipped'  /tmp/import_response.json)
+    FAILED=$(jq   '.failed'   /tmp/import_response.json)
+
+    echo "  OK — imported: $IMPORTED, updated: $UPDATED, skipped: $SKIPPED, failed: $FAILED"
+
+    if [[ "$FAILED" -gt 0 ]]; then
+      echo "  Failures:"
+      jq -r '.errors[] | "    [\(.index // "?")]  \(.sourceSite // "?")/\(.externalId // "?"): \(.reason)"' \
+        /tmp/import_response.json
+    fi
   else
     echo "  ERROR — HTTP $HTTP_STATUS"
     cat /tmp/import_response.json
