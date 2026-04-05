@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$OutputPath = (Join-Path -Path $PSScriptRoot -ChildPath "jooble-import.json")
+    [string]$OutputDirectory = $PSScriptRoot
 )
 
 Set-StrictMode -Version Latest
@@ -76,6 +76,13 @@ foreach ($region in $RegionCountryMap.Keys) {
         }
     }
 }
+
+$CountryList = @(
+    $RegionCountryMap.Values |
+    ForEach-Object { $_ } |
+    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+    Sort-Object -Unique
+)
 
 $CountryAliases = @{
     "UK"                       = "United Kingdom"
@@ -449,236 +456,217 @@ function Build-Description {
 }
 
 # ---------------------------------------------------------------------------
-# Fetch from Jooble
+# Fetch / transform / output per country
 # ---------------------------------------------------------------------------
 
-Write-Host "Fetching Jooble jobs..."
-
-$requestBody  = '{"location":"South Australia"}'
-$requestBytes = [System.Text.Encoding]::UTF8.GetBytes($requestBody)
-
-$request = [System.Net.HttpWebRequest]::Create($JOOBLE_API_URL + $JOOBLE_API_KEY)
-$request.Method        = "POST"
-$request.ContentType   = "application/json; charset=utf-8"
-$request.Accept        = "application/json"
-$request.ContentLength = $requestBytes.Length
-$request.Timeout       = 30000
-
-try {
-    $reqStream = $request.GetRequestStream()
-    $reqStream.Write($requestBytes, 0, $requestBytes.Length)
-    $reqStream.Close()
-
-    $response   = $request.GetResponse()
-    $reader     = [System.IO.StreamReader]::new($response.GetResponseStream(), [System.Text.Encoding]::UTF8)
-    $rawContent = $reader.ReadToEnd()
-    $reader.Close()
-    $response.Close()
-}
-catch [System.Net.WebException] {
-    $ex = $_.Exception
-    $detail = if ($ex.Response) {
-        $errReader = [System.IO.StreamReader]::new($ex.Response.GetResponseStream())
-        $body = $errReader.ReadToEnd()
-        $errReader.Close()
-        $ex.Response.Close()
-        $body
-    } else { $ex.Message }
-
-    Write-Warning "Jooble request failed — writing empty output and skipping. ($detail)"
-    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-    [System.IO.File]::WriteAllText($OutputPath, "[]", $utf8NoBom)
-    exit 0
-}
-catch {
-    Write-Warning "Jooble request failed — writing empty output and skipping. ($_)"
-    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-    [System.IO.File]::WriteAllText($OutputPath, "[]", $utf8NoBom)
-    exit 0
+if (-not (Test-Path $OutputDirectory)) {
+    New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 }
 
-# Parse the response
-$parsed = $null
-try {
-    $parsed = $rawContent | ConvertFrom-Json
-}
-catch {
-    Write-Warning "Jooble response could not be parsed as JSON — writing empty output and skipping."
-    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-    [System.IO.File]::WriteAllText($OutputPath, "[]", $utf8NoBom)
-    exit 0
-}
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 
-if ($null -eq $parsed) {
-    Write-Warning "Jooble API returned no data — writing empty output and skipping."
-    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-    [System.IO.File]::WriteAllText($OutputPath, "[]", $utf8NoBom)
-    exit 0
-}
+foreach ($searchCountry in $CountryList) {
 
-# Jooble returns { totalCount: N, jobs: [...] }
-$rawJobs = @(Get-Prop $parsed "jobs" @())
+    $countryFilePart = $searchCountry.ToLowerInvariant() `
+        -replace '[^a-z0-9]+', '-' `
+        -replace '^-|-$', ''
 
-if ($rawJobs.Count -eq 0) {
-    Write-Warning "Jooble API returned no job records — writing empty output and skipping."
-    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-    [System.IO.File]::WriteAllText($OutputPath, "[]", $utf8NoBom)
-    exit 0
-}
+    $currentOutputPath = Join-Path -Path $OutputDirectory -ChildPath ("jooble_{0}-import.json" -f $countryFilePart)
 
-Write-Host "Received $($rawJobs.Count) jobs from Jooble."
+    Write-Host "Fetching Jooble jobs for: $searchCountry"
 
-# ---------------------------------------------------------------------------
-# Transform
-# ---------------------------------------------------------------------------
+    $requestBody  = @{ location = $searchCountry } | ConvertTo-Json -Compress
+    $requestBytes = [System.Text.Encoding]::UTF8.GetBytes($requestBody)
 
-$seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $request = [System.Net.HttpWebRequest]::Create($JOOBLE_API_URL + $JOOBLE_API_KEY)
+    $request.Method        = "POST"
+    $request.ContentType   = "application/json; charset=utf-8"
+    $request.Accept        = "application/json"
+    $request.ContentLength = $requestBytes.Length
+    $request.Timeout       = 30000
 
-$transformed = foreach ($job in $rawJobs) {
+    try {
+        $reqStream = $request.GetRequestStream()
+        $reqStream.Write($requestBytes, 0, $requestBytes.Length)
+        $reqStream.Close()
 
-    # --- Core fields ---
-    $id      = Normalize-String (Get-Prop $job "id")
-    $title   = Normalize-String (Get-Prop $job "title")
-    $link    = Normalize-String (Get-Prop $job "link")
-    $snippet = Normalize-String (Get-Prop $job "snippet")
-    $company = Normalize-String (Get-Prop $job "company")
-    $type    = Normalize-String (Get-Prop $job "type")
-    $locRaw  = Normalize-String (Get-Prop $job "location")
-    $salary  = Normalize-String (Get-Prop $job "salary")
-    $updated = Normalize-String (Get-Prop $job "updated")
-    $image   = Normalize-String (Get-Prop $job "image")
+        $response   = $request.GetResponse()
+        $reader     = [System.IO.StreamReader]::new($response.GetResponseStream(), [System.Text.Encoding]::UTF8)
+        $rawContent = $reader.ReadToEnd()
+        $reader.Close()
+        $response.Close()
+    }
+    catch [System.Net.WebException] {
+        $ex = $_.Exception
+        $detail = if ($ex.Response) {
+            $errReader = [System.IO.StreamReader]::new($ex.Response.GetResponseStream())
+            $body = $errReader.ReadToEnd()
+            $errReader.Close()
+            $ex.Response.Close()
+            $body
+        } else { $ex.Message }
 
-    # Require minimum viable fields
-    if ($null -eq $id)      { continue }
-    if ($null -eq $title)   { continue }
-    if ($null -eq $link)    { continue }
-
-    # Deduplicate within the batch
-    if (-not $seen.Add($id)) {
-        Write-Warning "Duplicate Jooble id skipped: $id"
+        Write-Warning "Jooble request failed for '$searchCountry' — writing empty output and continuing. ($detail)"
+        [System.IO.File]::WriteAllText($currentOutputPath, "[]", $utf8NoBom)
+        continue
+    }
+    catch {
+        Write-Warning "Jooble request failed for '$searchCountry' — writing empty output and continuing. ($_)"
+        [System.IO.File]::WriteAllText($currentOutputPath, "[]", $utf8NoBom)
         continue
     }
 
-    # Company name — fall back to source domain if company missing
-    if ($null -eq $company) {
-        $source = Normalize-String (Get-Prop $job "source")
-        $company = if ($null -ne $source) { $source } else { "Unknown" }
+    # Parse the response
+    $parsed = $null
+    try {
+        $parsed = $rawContent | ConvertFrom-Json
+    }
+    catch {
+        Write-Warning "Jooble response for '$searchCountry' could not be parsed as JSON — writing empty output and continuing."
+        [System.IO.File]::WriteAllText($currentOutputPath, "[]", $utf8NoBom)
+        continue
     }
 
-    # Location / workplace / geography
-    $locationText = $locRaw
-    $workplaceType = Get-WorkplaceType -LocationText $locationText -Type $type
-    $country       = Get-CountryFromLocation -LocationText $locationText
-    $regions       = @(Get-RegionsFromLocationText -LocationText $locationText -Country $country)
-    $countries     = if ($null -ne $country) { @($country) } else { @() }
-
-    # Employment type — mapped from Jooble "type" field; omit property if unknown
-    $empType = Convert-EmploymentType -Type $type -Title $title
-
-    # Category
-    $snippetPlain = Strip-HtmlToPlainText -Html $snippet
-    $category = Get-JobCategory -Title $title -SnippetPlain $snippetPlain
-
-    # Description
-    $description = Build-Description -Snippet $snippet
-
-    # Summary (max 100 chars, plain text)
-    $summary = Get-PlainTextSummary -Text $snippet -MaxLength 100
-
-    # Salary
-    $salaryParsed = Parse-SalaryRange -SalaryText $salary
-    $salaryFrom   = $salaryParsed.From
-    $salaryTo     = $salaryParsed.To
-    $salaryCurrency = $salaryParsed.Currency
-
-    # Published date
-    $publishedUtc = ConvertTo-UtcIsoString $updated
-
-    # Slug
-    $slug = ConvertTo-JobSlug -Title $title -Id $id
-
-    # Build output object
-    $jobObj = [PSCustomObject][ordered]@{
-        sourceSite             = "jooble.org"
-        externalId             = $id
-        companyName            = $company
-        companyLogoUrl         = $image
-
-        title                  = $title
-        description            = $description
-        workplaceType          = $workplaceType
-        employmentType         = $empType
-
-        externalApplicationUrl = $link
-
-        category               = $category
-        keywords               = $null
-        regions                = @($regions)
-        countries              = @($countries)
-
-        summary                = $summary
-        requirements           = $null
-        benefits               = $null
-        department             = $null
-
-        salaryFrom             = $salaryFrom
-        salaryTo               = $salaryTo
-        salaryCurrency         = $salaryCurrency
-
-        publishedUtc           = $publishedUtc
-        postingExpiresUtc      = $null
-
-        locationText           = $locationText
-        locationCity           = $null
-        locationState          = $null
-        locationCountry        = $country
-        locationCountryCode    = $null
-        locationLatitude       = $null
-        locationLongitude      = $null
-
-        slug                   = $slug
+    if ($null -eq $parsed) {
+        Write-Warning "Jooble API returned no data for '$searchCountry' — writing empty output and continuing."
+        [System.IO.File]::WriteAllText($currentOutputPath, "[]", $utf8NoBom)
+        continue
     }
 
-    # employmentType is a non-nullable enum on the API — omit the property when
-    # unknown so the API uses its default rather than rejecting the record.
-    if ($null -eq $jobObj.employmentType) {
-        $jobObj.PSObject.Properties.Remove('employmentType')
+    # Jooble returns { totalCount: N, jobs: [...] }
+    $rawJobs = @(Get-Prop $parsed "jobs" @())
+
+    if ($rawJobs.Count -eq 0) {
+        Write-Warning "Jooble API returned no job records for '$searchCountry' — skipping file."
+        continue
     }
 
-    # companyLogoUrl: remove if null/empty to keep JSON clean
-    if ($null -eq $jobObj.companyLogoUrl) {
-        $jobObj.PSObject.Properties.Remove('companyLogoUrl')
+    Write-Host "Received $($rawJobs.Count) jobs from Jooble for $searchCountry."
+
+    # -----------------------------------------------------------------------
+    # Transform
+    # -----------------------------------------------------------------------
+
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    $transformed = foreach ($job in $rawJobs) {
+
+        # --- Core fields ---
+        $id      = Normalize-String (Get-Prop $job "id")
+        $title   = Normalize-String (Get-Prop $job "title")
+        $link    = Normalize-String (Get-Prop $job "link")
+        $snippet = Normalize-String (Get-Prop $job "snippet")
+        $company = Normalize-String (Get-Prop $job "company")
+        $type    = Normalize-String (Get-Prop $job "type")
+        $locRaw  = Normalize-String (Get-Prop $job "location")
+        $salary  = Normalize-String (Get-Prop $job "salary")
+        $updated = Normalize-String (Get-Prop $job "updated")
+        $image   = Normalize-String (Get-Prop $job "image")
+
+        if ($null -eq $id)    { continue }
+        if ($null -eq $title) { continue }
+        if ($null -eq $link)  { continue }
+
+        if (-not $seen.Add($id)) {
+            Write-Warning "Duplicate Jooble id skipped for '$searchCountry': $id"
+            continue
+        }
+
+        if ($null -eq $company) {
+            $source = Normalize-String (Get-Prop $job "source")
+            $company = if ($null -ne $source) { $source } else { "Unknown" }
+        }
+
+        $locationText  = $locRaw
+        $workplaceType = Get-WorkplaceType -LocationText $locationText -Type $type
+        $country       = Get-CountryFromLocation -LocationText $locationText
+        $regions       = @(Get-RegionsFromLocationText -LocationText $locationText -Country $country)
+        $countries     = if ($null -ne $country) { @($country) } else { @() }
+
+        $empType = Convert-EmploymentType -Type $type -Title $title
+
+        $snippetPlain = Strip-HtmlToPlainText -Html $snippet
+        $category = Get-JobCategory -Title $title -SnippetPlain $snippetPlain
+
+        $description = Build-Description -Snippet $snippet
+        $summary     = Get-PlainTextSummary -Text $snippet -MaxLength 100
+
+        $salaryParsed    = Parse-SalaryRange -SalaryText $salary
+        $salaryFrom      = $salaryParsed.From
+        $salaryTo        = $salaryParsed.To
+        $salaryCurrency  = $salaryParsed.Currency
+
+        $publishedUtc = ConvertTo-UtcIsoString $updated
+        $slug         = ConvertTo-JobSlug -Title $title -Id $id
+
+        $jobObj = [PSCustomObject][ordered]@{
+            sourceSite             = "jooble.org"
+            externalId             = $id
+            companyName            = $company
+            companyLogoUrl         = $image
+
+            title                  = $title
+            description            = $description
+            workplaceType          = $workplaceType
+            employmentType         = $empType
+
+            externalApplicationUrl = $link
+
+            category               = $category
+            keywords               = $null
+            regions                = @($regions)
+            countries              = @($countries)
+
+            summary                = $summary
+            requirements           = $null
+            benefits               = $null
+            department             = $null
+
+            salaryFrom             = $salaryFrom
+            salaryTo               = $salaryTo
+            salaryCurrency         = $salaryCurrency
+
+            publishedUtc           = $publishedUtc
+            postingExpiresUtc      = $null
+
+            locationText           = $locationText
+            locationCity           = $null
+            locationState          = $null
+            locationCountry        = $country
+            locationCountryCode    = $null
+            locationLatitude       = $null
+            locationLongitude      = $null
+
+            slug                   = $slug
+        }
+
+        if ($null -eq $jobObj.employmentType) {
+            $jobObj.PSObject.Properties.Remove('employmentType')
+        }
+
+        if ($null -eq $jobObj.companyLogoUrl) {
+            $jobObj.PSObject.Properties.Remove('companyLogoUrl')
+        }
+
+        $jobObj
     }
 
-    $jobObj
+    $transformedArr = @($transformed | Where-Object { $null -ne $_ })
+
+    if ($transformedArr.Count -eq 0) {
+        Write-Warning "No valid Jooble records after transformation for '$searchCountry' — skipping file."
+        continue
+    }
+
+    $jsonContent = $transformedArr | ConvertTo-Json -Depth 20
+
+    try {
+        [System.IO.File]::WriteAllText($currentOutputPath, $jsonContent, $utf8NoBom)
+    }
+    catch {
+        throw "Failed to write output to '$currentOutputPath': $_"
+    }
+
+    Write-Host "Transformed job count : $($transformedArr.Count)"
+    Write-Host "Output written to     : $currentOutputPath"
 }
-
-$transformedArr = @($transformed | Where-Object { $null -ne $_ })
-if ($transformedArr.Count -eq 0) {
-    Write-Warning "No valid Jooble records after transformation — writing empty output and skipping."
-    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-    [System.IO.File]::WriteAllText($OutputPath, "[]", $utf8NoBom)
-    exit 0
-}
-
-# ---------------------------------------------------------------------------
-# Output
-# ---------------------------------------------------------------------------
-
-$directory = Split-Path -Path $OutputPath -Parent
-if (-not [string]::IsNullOrWhiteSpace($directory) -and -not (Test-Path $directory)) {
-    New-Item -ItemType Directory -Path $directory -Force | Out-Null
-}
-
-$jsonContent = $transformedArr | ConvertTo-Json -Depth 20
-
-try {
-    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-    [System.IO.File]::WriteAllText($OutputPath, $jsonContent, $utf8NoBom)
-}
-catch {
-    throw "Failed to write output to '$OutputPath': $_"
-}
-
-Write-Host "Transformed job count : $($transformedArr.Count)"
-Write-Host "Output written to     : $OutputPath"
