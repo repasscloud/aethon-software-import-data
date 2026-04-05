@@ -16,7 +16,10 @@ if [[ ! -f "$INPUT_FILE" ]]; then
 fi
 
 TOTAL=$(jq 'length' "$INPUT_FILE")
-echo "Found $TOTAL records in $INPUT_FILE"
+echo "========================================"
+echo "  Importing: $INPUT_FILE"
+echo "  Records:   $TOTAL"
+echo "========================================"
 
 if [[ "$TOTAL" -eq 0 ]]; then
   echo "Nothing to import."
