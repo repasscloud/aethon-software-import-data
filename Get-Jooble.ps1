@@ -169,8 +169,14 @@ function Get-PlainTextSummary {
     $plain = Strip-HtmlToPlainText -Html $Text
     if ([string]::IsNullOrWhiteSpace($plain)) { return $null }
     $plain = ($plain -replace '[\r\n]+', ' ' -replace '\s{2,}', ' ').Trim()
+    # Strip trailing ellipsis that sources append to their own truncated snippets
+    $plain = $plain -replace '\s*\.{2,}$', ''
     if ($plain.Length -le $MaxLength) { return $plain }
-    return $plain.Substring(0, $MaxLength)
+    # Truncate at the last complete word that fits within MaxLength
+    $truncated = $plain.Substring(0, $MaxLength)
+    $lastSpace = $truncated.LastIndexOf(' ')
+    if ($lastSpace -gt 0) { return $truncated.Substring(0, $lastSpace) }
+    return $truncated
 }
 
 function Normalize-CountryName {
@@ -440,6 +446,10 @@ function Build-Description {
 
     # Snippet is already HTML from Jooble — strip any embedded newlines before wrapping
     $html = $Snippet.Trim() -replace '[\r\n]+', ' '
+    # Remove trailing ellipsis that Jooble appends to its own truncated snippets,
+    # handling both plain "..." and HTML-encoded variants before any closing tag
+    $html = $html -replace '(\s*\.{2,})\s*(</[^>]+>)$', '$2'
+    $html = $html -replace '\s*\.{2,}$', ''
     if ($html -notmatch '(?i)^<(p|div|ul|ol|h[1-6])') {
         $html = "<p>$html</p>"
     }
@@ -547,9 +557,10 @@ foreach ($searchCountry in $CountryList) {
     # Transform
     # -----------------------------------------------------------------------
 
-    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $seen           = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $transformedArr = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-    $transformed = foreach ($job in $rawJobs) {
+    foreach ($job in $rawJobs) {
 
         # --- Core fields ---
         $id      = Normalize-String (Get-Prop $job "id")
@@ -648,17 +659,15 @@ foreach ($searchCountry in $CountryList) {
             $jobObj.PSObject.Properties.Remove('companyLogoUrl')
         }
 
-        $jobObj
+        [void]$transformedArr.Add($jobObj)
     }
-
-    $transformedArr = @($transformed | Where-Object { $null -ne $_ })
 
     if ($transformedArr.Count -eq 0) {
         Write-Warning "No valid Jooble records after transformation for '$searchCountry' — skipping file."
         continue
     }
 
-    $jsonContent = $transformedArr | ConvertTo-Json -Depth 20 -AsArray
+    $jsonContent = $transformedArr.ToArray() | ConvertTo-Json -Depth 20 -AsArray
 
     try {
         [System.IO.File]::WriteAllText($currentOutputPath, $jsonContent, $utf8NoBom)
