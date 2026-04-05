@@ -374,6 +374,20 @@ function Convert-ToUtcIsoString {
     }
 }
 
+$ValidCurrencyCodes = @(
+    "AUD","USD","EUR","GBP","NZD","CAD","CHF","JPY","CNY","HKD",
+    "SEK","KRW","SGD","NOK","MXN","INR","RUB","ZAR","TRY","BRL","RON"
+)
+
+function Normalize-CurrencyCode {
+    param([AllowNull()][object]$Value)
+    if ($null -eq $Value) { return $null }
+    $code = ([string]$Value).Trim().ToUpperInvariant()
+    if ([string]::IsNullOrWhiteSpace($code)) { return $null }
+    if ($ValidCurrencyCodes -contains $code) { return $code }
+    return $null
+}
+
 function Convert-SafeDecimal {
     param(
         [AllowNull()]
@@ -585,7 +599,7 @@ $transformed = foreach ($job in $jobs) {
 
         salaryFrom             = Convert-SafeDecimal -Value (Get-ObjectPropertyValue -InputObject $job -PropertyName "salaryMin")
         salaryTo               = Convert-SafeDecimal -Value (Get-ObjectPropertyValue -InputObject $job -PropertyName "salaryMax")
-        salaryCurrency         = Get-ObjectPropertyValue -InputObject $job -PropertyName "salaryCurrency"
+        salaryCurrency         = Normalize-CurrencyCode -Value (Get-ObjectPropertyValue -InputObject $job -PropertyName "salaryCurrency")
 
         publishedUtc           = Convert-ToUtcIsoString -Value (Get-ObjectPropertyValue -InputObject $job -PropertyName "pubDate")
         postingExpiresUtc      = $null
@@ -607,7 +621,7 @@ if (-not [string]::IsNullOrWhiteSpace($directory) -and -not (Test-Path $director
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
 }
 
-$jsonContent = ConvertTo-Json -InputObject @($transformed) -Depth 20 -AsArray
+$jsonContent = @($transformed) | ConvertTo-Json -Depth 20 -AsArray
 try {
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
     [System.IO.File]::WriteAllText($OutputPath, $jsonContent, $utf8NoBom)

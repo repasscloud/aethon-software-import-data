@@ -658,7 +658,7 @@ foreach ($searchCountry in $CountryList) {
         continue
     }
 
-    $jsonContent = ConvertTo-Json -InputObject $transformedArr -Depth 20 -AsArray
+    $jsonContent = $transformedArr | ConvertTo-Json -Depth 20 -AsArray
 
     try {
         [System.IO.File]::WriteAllText($currentOutputPath, $jsonContent, $utf8NoBom)
