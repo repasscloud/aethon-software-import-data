@@ -7,7 +7,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $USAJOBS_API_KEY    = $env:USAJOBS_API_KEY
-$USAJOBS_USER_AGENT = "hello@repasscloud.com"
+$USAJOBS_USER_AGENT = $env:USAJOBS_USER_AGENT
 $COMPANY_LOGO_URL   = "https://raw.githubusercontent.com/repasscloud/aethon-software-import-data/refs/heads/main/usajobs/img/icons/red-2x.svg"
 
 # ---------------------------------------------------------------------------
