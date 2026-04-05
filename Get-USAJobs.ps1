@@ -331,7 +331,19 @@ function Build-Description {
         return "<p>Please visit the application URL for full job details.</p>"
     }
 
-    return $parts -join ""
+    $html = $parts -join ""
+
+    # Truncate to stay within the 20 000-char DB limit (JobConfiguration.HasMaxLength(20000)).
+    $maxLen  = 19800
+    $trailer = "<p><em>Description truncated. View full details on the source site.</em></p>"
+    if ($html.Length -gt $maxLen) {
+        # Walk back from the limit to avoid cutting inside an HTML tag.
+        $cutAt = $maxLen
+        while ($cutAt -gt 0 -and $html[$cutAt] -ne '>') { $cutAt-- }
+        $html = $html.Substring(0, $cutAt + 1) + $trailer
+    }
+
+    return $html
 }
 
 # ---------------------------------------------------------------------------
