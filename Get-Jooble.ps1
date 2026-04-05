@@ -2,7 +2,8 @@ $url = "https://jooble.org/api/"
 $key = $env:JOOBLE_API_KEY
 
 if ([string]::IsNullOrWhiteSpace($key)) {
-    throw "JOOBLE_API_KEY is missing."
+    Write-Warning "JOOBLE_API_KEY is missing — skipping."
+    exit 0
 }
 
 $body = '{"location":"City of Sydney, NSW"}'
@@ -36,8 +37,10 @@ catch [System.Net.WebException] {
         $errorReader.Close()
         $errorResponse.Close()
 
-        throw "Jooble request failed: $errorBody"
+        Write-Warning "Jooble request failed — skipping. ($errorBody)"
+        exit 0
     }
 
-    throw
+    Write-Warning "Jooble request failed — skipping. ($($exception.Message))"
+    exit 0
 }

@@ -352,11 +352,26 @@ function Build-Description {
 
 Write-Host "Fetching USAJobs (page 1, up to 500 results)..."
 
-$Data = Get-USAJobsSearchResult `
-    -ApiKey $USAJOBS_API_KEY `
-    -UserAgentEmail $USAJOBS_USER_AGENT `
-    -Page 1 `
-    -ResultsPerPage 500
+try {
+    $Data = Get-USAJobsSearchResult `
+        -ApiKey $USAJOBS_API_KEY `
+        -UserAgentEmail $USAJOBS_USER_AGENT `
+        -Page 1 `
+        -ResultsPerPage 500
+}
+catch {
+    Write-Warning "USAJobs API request failed — writing empty output and skipping. ($_)"
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($OutputPath, "[]", $utf8NoBom)
+    exit 0
+}
+
+if ($null -eq $Data -or $Data.ReturnedCount -eq 0) {
+    Write-Warning "USAJobs API returned no jobs — writing empty output and skipping."
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($OutputPath, "[]", $utf8NoBom)
+    exit 0
+}
 
 Write-Host "Returned: $($Data.ReturnedCount) jobs  |  Total available: $($Data.TotalJobs)  |  Pages: $($Data.PageCount)"
 
@@ -492,6 +507,13 @@ $transformed = foreach ($item in $Data.Jobs) {
     }
 
     $jobObj
+}
+
+if (@($transformed).Count -eq 0) {
+    Write-Warning "No valid USAJobs records after transformation — writing empty output and skipping."
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($OutputPath, "[]", $utf8NoBom)
+    exit 0
 }
 
 # ---------------------------------------------------------------------------

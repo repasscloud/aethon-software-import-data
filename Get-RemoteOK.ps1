@@ -652,11 +652,17 @@ try {
     $response     = $responseText | ConvertFrom-Json
 }
 catch {
-    throw "Failed to fetch jobs from '$ApiUrl': $_"
+    Write-Warning "Failed to fetch jobs from '$ApiUrl' — writing empty output and skipping. ($_)"
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($OutputPath, "[]", $utf8NoBom)
+    exit 0
 }
 
 if ($null -eq $response) {
-    throw "The API returned no data."
+    Write-Warning "RemoteOK API returned no data — writing empty output and skipping."
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($OutputPath, "[]", $utf8NoBom)
+    exit 0
 }
 
 $jobs = @(
@@ -669,7 +675,10 @@ $jobs = @(
 )
 
 if ($jobs.Count -eq 0) {
-    throw "The API response did not contain any job records."
+    Write-Warning "RemoteOK API returned no job records — writing empty output and skipping."
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($OutputPath, "[]", $utf8NoBom)
+    exit 0
 }
 
 $transformed = foreach ($job in $jobs) {

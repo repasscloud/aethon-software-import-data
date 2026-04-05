@@ -505,17 +505,26 @@ try {
     $data = Invoke-RestMethod -Uri $ApiUrl -Method Get
 }
 catch {
-    throw "Failed to fetch jobs from '$ApiUrl': $_"
+    Write-Warning "Failed to fetch jobs from '$ApiUrl' — writing empty output and skipping. ($_)"
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($OutputPath, "[]", $utf8NoBom)
+    exit 0
 }
 
 if ($null -eq $data) {
-    throw "The API returned no data."
+    Write-Warning "Jobicy API returned no data — writing empty output and skipping."
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($OutputPath, "[]", $utf8NoBom)
+    exit 0
 }
 
 $jobs = @(Get-ObjectPropertyValue -InputObject $data -PropertyName "jobs" -DefaultValue @())
 
 if ($jobs.Count -eq 0) {
-    throw "The API response did not contain any jobs."
+    Write-Warning "Jobicy API returned no jobs — writing empty output and skipping."
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [System.IO.File]::WriteAllText($OutputPath, "[]", $utf8NoBom)
+    exit 0
 }
 
 function Normalize-SingleLine {
@@ -612,14 +621,16 @@ Write-Host "Transformed job count: $(@($transformed).Count)"
 
 # Download company logos and save to local paths, while preserving directory structure
 if (-not (Test-Path -LiteralPath $OutputPath)) {
-    throw "Input file not found: $OutputPath"
+    Write-Warning "Output file not found after write — skipping logo phase."
+    exit 0
 }
 
 # Read and parse the JSON file
 $jobs = Get-Content -LiteralPath $OutputPath -Raw | ConvertFrom-Json
 
-if ($null -eq $jobs) {
-    throw "No job data found in: $OutputPath"
+if ($null -eq $jobs -or @($jobs).Count -eq 0) {
+    Write-Host "No jobs in output — skipping logo phase."
+    exit 0
 }
 
 foreach ($job in $jobs) {
