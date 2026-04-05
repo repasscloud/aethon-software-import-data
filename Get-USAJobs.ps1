@@ -76,7 +76,7 @@ function Get-Prop {
     return $p.Value
 }
 
-function Normalize-String {
+function ConvertTo-NormalizedString {
     param([AllowNull()][object]$Value)
     if ($null -eq $Value) { return $null }
     $s = [string]$Value
@@ -86,7 +86,7 @@ function Normalize-String {
 
 function ConvertTo-UtcIsoString {
     param([AllowNull()][object]$Value)
-    $s = Normalize-String $Value
+    $s = ConvertTo-NormalizedString $Value
     if ($null -eq $s) { return $null }
     try { return ([datetimeoffset]::Parse($s)).UtcDateTime.ToString("o") }
     catch { return $null }
@@ -94,7 +94,7 @@ function ConvertTo-UtcIsoString {
 
 function ConvertTo-SafeDecimal {
     param([AllowNull()][object]$Value)
-    $s = Normalize-String $Value
+    $s = ConvertTo-NormalizedString $Value
     if ($null -eq $s) { return $null }
     try {
         $n = [decimal]$s
@@ -164,20 +164,20 @@ function Get-WorkplaceType {
     # Check every location — "Anywhere in the U.S." means fully remote
     $locations = @(Get-Prop $Descriptor "PositionLocation")
     foreach ($loc in $locations) {
-        $locName = Normalize-String (Get-Prop $loc "LocationName")
+        $locName = ConvertTo-NormalizedString (Get-Prop $loc "LocationName")
         if ($locName -match '(?i)(anywhere|remote|nationwide|no specific location|telework)') {
             return "Remote"
         }
     }
 
-    $locationDisplay = Normalize-String (Get-Prop $Descriptor "PositionLocationDisplay")
+    $locationDisplay = ConvertTo-NormalizedString (Get-Prop $Descriptor "PositionLocationDisplay")
     if ($locationDisplay -match '(?i)(anywhere|multiple locations|nationwide)') {
         return "Remote"
     }
 
     # Check telework eligibility
     $details  = Get-Prop (Get-Prop $Descriptor "UserArea") "Details"
-    $telework = Normalize-String (Get-Prop $details "Telework")
+    $telework = ConvertTo-NormalizedString (Get-Prop $details "Telework")
     if ($telework -match '(?i)^yes') {
         return "Hybrid"
     }
@@ -195,8 +195,8 @@ function Get-EmploymentType {
     $offeringTypes = @(Get-Prop $Descriptor "PositionOfferingType")
     $scheduleTypes = @(Get-Prop $Descriptor "PositionSchedule")
 
-    $offeringName = Normalize-String (Get-Prop ($offeringTypes | Select-Object -First 1) "Name")
-    $scheduleName = Normalize-String (Get-Prop ($scheduleTypes | Select-Object -First 1) "Name")
+    $offeringName = ConvertTo-NormalizedString (Get-Prop ($offeringTypes | Select-Object -First 1) "Name")
+    $scheduleName = ConvertTo-NormalizedString (Get-Prop ($scheduleTypes | Select-Object -First 1) "Name")
 
     if ($offeringName -match '(?i)internship|student') { return "Internship" }
     if ($offeringName -match '(?i)\btemporary\b')       { return "Temporary" }
@@ -217,8 +217,8 @@ function Get-JobCategory {
     $cats = @($JobCategories)
     if ($cats.Count -eq 0) { return $null }
 
-    $codeStr = Normalize-String (Get-Prop ($cats | Select-Object -First 1) "Code")
-    $nameStr = Normalize-String (Get-Prop ($cats | Select-Object -First 1) "Name")
+    $codeStr = ConvertTo-NormalizedString (Get-Prop ($cats | Select-Object -First 1) "Code")
+    $nameStr = ConvertTo-NormalizedString (Get-Prop ($cats | Select-Object -First 1) "Name")
 
     # Series-code mapping (OPM GS occupational groups)
     $code = 0
@@ -279,13 +279,13 @@ function Build-Description {
     param($Descriptor)
 
     $details      = Get-Prop (Get-Prop $Descriptor "UserArea") "Details"
-    $jobSummary   = Normalize-String (Get-Prop $details "JobSummary")
-    $qualSummary  = Normalize-String (Get-Prop $Descriptor "QualificationSummary")
+    $jobSummary   = ConvertTo-NormalizedString (Get-Prop $details "JobSummary")
+    $qualSummary  = ConvertTo-NormalizedString (Get-Prop $Descriptor "QualificationSummary")
     $majorDuties  = @(@(Get-Prop $details "MajorDuties" @()) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     $keyReqs      = @(@(Get-Prop $details "KeyRequirements" @()) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    $education    = Normalize-String (Get-Prop $details "Education")
-    $evaluations  = Normalize-String (Get-Prop $details "Evaluations")
-    $otherInfo    = Normalize-String (Get-Prop $details "OtherInformation")
+    $education    = ConvertTo-NormalizedString (Get-Prop $details "Education")
+    $evaluations  = ConvertTo-NormalizedString (Get-Prop $details "Evaluations")
+    $otherInfo    = ConvertTo-NormalizedString (Get-Prop $details "OtherInformation")
 
     $parts = [System.Collections.Generic.List[string]]::new()
 
@@ -382,7 +382,7 @@ $transformed = foreach ($item in $Data.Jobs) {
     $d = $item.MatchedObjectDescriptor
     if ($null -eq $d) { continue }
 
-    $positionId = Normalize-String (Get-Prop $d "PositionID")
+    $positionId = ConvertTo-NormalizedString (Get-Prop $d "PositionID")
     if ($null -eq $positionId) { continue }
 
     if (-not $seen.Add($positionId)) {
@@ -390,14 +390,14 @@ $transformed = foreach ($item in $Data.Jobs) {
         continue
     }
 
-    $title = Normalize-String (Get-Prop $d "PositionTitle")
+    $title = ConvertTo-NormalizedString (Get-Prop $d "PositionTitle")
     if ($null -eq $title) { continue }
 
     # External application URL — prefer ApplyURI[0], fall back to PositionURI
     $applyUris  = @(Get-Prop $d "ApplyURI" @())
-    $applyUrl   = Normalize-String ($applyUris | Select-Object -First 1)
+    $applyUrl   = ConvertTo-NormalizedString ($applyUris | Select-Object -First 1)
     if ($null -eq $applyUrl) {
-        $applyUrl = Normalize-String (Get-Prop $d "PositionURI")
+        $applyUrl = ConvertTo-NormalizedString (Get-Prop $d "PositionURI")
     }
     if ($null -eq $applyUrl) { continue }
 
@@ -405,9 +405,9 @@ $transformed = foreach ($item in $Data.Jobs) {
     $locations     = @(Get-Prop $d "PositionLocation" @())
     $firstLocation = $locations | Select-Object -First 1
 
-    $locationText  = Normalize-String (Get-Prop $d "PositionLocationDisplay")
-    $locationCity  = Normalize-String (Get-Prop $firstLocation "CityName")
-    $locationState = Normalize-String (Get-Prop $firstLocation "CountrySubDivisionCode")
+    $locationText  = ConvertTo-NormalizedString (Get-Prop $d "PositionLocationDisplay")
+    $locationCity  = ConvertTo-NormalizedString (Get-Prop $firstLocation "CityName")
+    $locationState = ConvertTo-NormalizedString (Get-Prop $firstLocation "CountrySubDivisionCode")
 
     $locationLat = $null
     $locationLon = $null
@@ -423,7 +423,7 @@ $transformed = foreach ($item in $Data.Jobs) {
     $remunerations  = @(Get-Prop $d "PositionRemuneration" @())
     $firstRem       = $remunerations | Select-Object -First 1
     if ($null -ne $firstRem) {
-        $rateCode = Normalize-String (Get-Prop $firstRem "RateIntervalCode")
+        $rateCode = ConvertTo-NormalizedString (Get-Prop $firstRem "RateIntervalCode")
         if ($rateCode -eq "PA") {
             $salaryFrom     = ConvertTo-SafeDecimal (Get-Prop $firstRem "MinimumRange")
             $salaryTo       = ConvertTo-SafeDecimal (Get-Prop $firstRem "MaximumRange")
@@ -438,7 +438,7 @@ $transformed = foreach ($item in $Data.Jobs) {
     # Keywords from job categories
     $jobCats = @(Get-Prop $d "JobCategory" @())
     $keywords = if ($jobCats.Count -gt 0) {
-        ($jobCats | ForEach-Object { Normalize-String (Get-Prop $_ "Name") } | Where-Object { $_ }) -join ","
+        ($jobCats | ForEach-Object { ConvertTo-NormalizedString (Get-Prop $_ "Name") } | Where-Object { $_ }) -join ","
     } else { $null }
 
     # Requirements — KeyRequirements array or Requirements text
@@ -449,11 +449,11 @@ $transformed = foreach ($item in $Data.Jobs) {
         $li = ($keyReqs | ForEach-Object { "<li>$(ConvertTo-HtmlEncoded $_)</li>" }) -join ""
         $requirements = "<ul>$li</ul>"
     } else {
-        $requirements = Normalize-String (Get-Prop $details "Requirements")
+        $requirements = ConvertTo-NormalizedString (Get-Prop $details "Requirements")
     }
 
     # Benefits
-    $benefitsText = Normalize-String (Get-Prop $details "Benefits")
+    $benefitsText = ConvertTo-NormalizedString (Get-Prop $details "Benefits")
 
     # Employment / workplace
     $empType       = Get-EmploymentType -Descriptor $d
@@ -462,7 +462,7 @@ $transformed = foreach ($item in $Data.Jobs) {
     $jobObj = [PSCustomObject][ordered]@{
         sourceSite             = "usajobs.gov"
         externalId             = $positionId
-        companyName            = Normalize-String (Get-Prop $d "OrganizationName")
+        companyName            = ConvertTo-NormalizedString (Get-Prop $d "OrganizationName")
         companyLogoUrl         = $COMPANY_LOGO_URL
 
         title                  = $title
@@ -477,10 +477,10 @@ $transformed = foreach ($item in $Data.Jobs) {
         regions                = @("NorthAmerica")
         countries              = @("United States")
 
-        summary                = Get-PlainTextSummary -Text (Normalize-String (Get-Prop $details "JobSummary")) -MaxLength 100
+        summary                = Get-PlainTextSummary -Text (ConvertTo-NormalizedString (Get-Prop $details "JobSummary")) -MaxLength 100
         requirements           = $requirements
         benefits               = $benefitsText
-        department             = Normalize-String (Get-Prop $d "DepartmentName")
+        department             = ConvertTo-NormalizedString (Get-Prop $d "DepartmentName")
 
         salaryFrom             = $salaryFrom
         salaryTo               = $salaryTo
