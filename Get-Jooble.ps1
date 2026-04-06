@@ -457,6 +457,9 @@ function Build-Description {
         $html = "<p>$html</p>"
     }
 
+    # Append Jooble notice — the API does not expose the full listing
+    $html += '<p>Jobs linked to Jooble are not completely available. Click ''Apply on company site'' button to get more info</p><img src="https://raw.githubusercontent.com/repasscloud/aethon-software-import-data/56a7f3995570dcb6dc69330e3908fe638f67f835/jooble/63dbbdf0d8a7bca40b8284cd_logo.svg" />'
+
     return $html
 }
 
