@@ -439,27 +439,26 @@ function ConvertTo-JobSlug {
 # ---------------------------------------------------------------------------
 
 function Build-Description {
-    param([AllowNull()][string]$Snippet)
-    if ([string]::IsNullOrWhiteSpace($Snippet)) {
+    param([AllowNull()][string]$Html)
+    if ([string]::IsNullOrWhiteSpace($Html)) {
         return "<p>Please visit the application URL for full job details.</p>"
     }
 
-    # Snippet is already HTML from Jooble — strip any embedded newlines before wrapping
-    $html = $Snippet.Trim() -replace '[\r\n]+', ' '
-    # Remove trailing ellipsis that Jooble appends to its own truncated snippets,
-    # handling both plain "..." and HTML-encoded variants before any closing tag
-    $html = $html -replace '(\s*\.{2,})\s*(</[^>]+>)$', '$2'
-    $html = $html -replace '\s*\.{2,}$', ''
+    # Normalise line endings to spaces — \r\n in HTML is whitespace, not content
+    $html = $Html.Trim() -replace '\r\n', ' ' -replace '\r', ' ' -replace '\n', ' '
+    # Collapse runs of whitespace/tabs created by the above
+    $html = $html -replace '[ \t]{2,}', ' '
+
+    # Wrap in <p> only if the content isn't already block-level HTML
     if ($html -notmatch '(?i)^<(p|div|ul|ol|h[1-6])') {
         $html = "<p>$html</p>"
     }
 
-    $maxLen  = 19800
-    $trailer = "<p><em>Description truncated. View full details on the source site.</em></p>"
-    if ($html.Length -gt $maxLen) {
-        $cutAt = $maxLen
+    # Hard cap at 20 000 chars (DB column limit) — break cleanly on a closing tag
+    if ($html.Length -gt 19800) {
+        $cutAt = 19800
         while ($cutAt -gt 0 -and $html[$cutAt] -ne '>') { $cutAt-- }
-        $html = $html.Substring(0, $cutAt + 1) + $trailer
+        $html = $html.Substring(0, $cutAt + 1) + "<p><em>Description truncated. View full details on the source site.</em></p>"
     }
 
     return $html
@@ -563,15 +562,18 @@ foreach ($searchCountry in $CountryList) {
     foreach ($job in $rawJobs) {
 
         # --- Core fields ---
-        $id      = Normalize-String (Get-Prop $job "id")
-        $title   = Normalize-String (Get-Prop $job "title")
-        $link    = Normalize-String (Get-Prop $job "link")
-        $snippet = Normalize-String (Get-Prop $job "snippet")
-        $company = Normalize-String (Get-Prop $job "company")
-        $type    = Normalize-String (Get-Prop $job "type")
-        $locRaw  = Normalize-String (Get-Prop $job "location")
-        $salary  = Normalize-String (Get-Prop $job "salary")
-        $updated = Normalize-String (Get-Prop $job "updated")
+        $id          = Normalize-String (Get-Prop $job "id")
+        $title       = Normalize-String (Get-Prop $job "title")
+        $link        = Normalize-String (Get-Prop $job "link")
+        # Jooble standard API returns 'snippet' (short HTML excerpt).
+        # Some API tiers also return 'description' (full HTML body) — prefer that when present.
+        $snippet     = Normalize-String (Get-Prop $job "snippet")
+        $fullDescRaw = Normalize-String (Get-Prop $job "description")
+        $company     = Normalize-String (Get-Prop $job "company")
+        $type        = Normalize-String (Get-Prop $job "type")
+        $locRaw      = Normalize-String (Get-Prop $job "location")
+        $salary      = Normalize-String (Get-Prop $job "salary")
+        $updated     = Normalize-String (Get-Prop $job "updated")
         $image   = Normalize-String (Get-Prop $job "image")
 
         if ($null -eq $id)    { continue }
@@ -599,7 +601,10 @@ foreach ($searchCountry in $CountryList) {
         $snippetPlain = Strip-HtmlToPlainText -Html $snippet
         $category = Get-JobCategory -Title $title -SnippetPlain $snippetPlain
 
-        $description = Build-Description -Snippet $snippet
+        # Use full description if the API returned one; otherwise fall back to snippet
+        $descHtml    = if ($null -ne $fullDescRaw -and $fullDescRaw.Length -gt 0) { $fullDescRaw } else { $snippet }
+        $description = Build-Description -Html $descHtml
+        # Summary is always derived from the snippet — plain text, truncated at last word within 100 chars
         $summary     = Get-PlainTextSummary -Text $snippet -MaxLength 100
 
         $salaryParsed    = Parse-SalaryRange -SalaryText $salary
