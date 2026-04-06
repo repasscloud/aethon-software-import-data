@@ -258,14 +258,18 @@ function Get-PlainTextSummary {
     }
 
     # Summary is a single-line field — collapse newlines and excess whitespace to spaces.
-    $plain = $plain -replace '[\r\n]+', ' ' -replace '\s{2,}', ' '
+    $plain = $plain -replace '[\r\n]+', ' ' -replace '\u00A0', ' ' -replace '\s{2,}', ' '
     $plain = $plain.Trim()
 
     if ($plain.Length -le $MaxLength) {
         return $plain
     }
 
-    return $plain.Substring(0, $MaxLength)
+    # Truncate at the last complete word that fits within MaxLength — no ellipsis
+    $truncated = $plain.Substring(0, $MaxLength)
+    $lastSpace = $truncated.LastIndexOf(' ')
+    if ($lastSpace -gt 0) { return $truncated.Substring(0, $lastSpace) }
+    return $truncated
 }
 
 function Convert-ToUtcIsoString {
@@ -712,7 +716,11 @@ $transformed = foreach ($job in $jobs) {
         companyLogoUrl         = $companyLogo
 
         title                  = $title
-        description            = if ($null -ne $descriptionHtml) { $descriptionHtml -replace '[\r\n]+', ' ' } else { $null }
+        description            = if ($null -ne $descriptionHtml) {
+                                     $d = $descriptionHtml -replace '[\r\n]+', ' '
+                                     $d = $d -replace '\u00A0', ' ' -replace '[\u2000-\u200B\u202F\u205F\u3000]', ' '
+                                     $d -replace '[ \t]{2,}', ' '
+                                 } else { $null }
         workplaceType          = "Remote"
         employmentType         = Get-EmploymentType -Tags $tags -Title $title -DescriptionPlain $descriptionPlain
 

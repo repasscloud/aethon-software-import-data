@@ -444,21 +444,17 @@ function Build-Description {
         return "<p>Please visit the application URL for full job details.</p>"
     }
 
-    # Normalise line endings to spaces — \r\n in HTML is whitespace, not content
-    $html = $Html.Trim() -replace '\r\n', ' ' -replace '\r', ' ' -replace '\n', ' '
-    # Collapse runs of whitespace/tabs created by the above
+    # Remove \r and \n — they are insignificant whitespace in HTML
+    $html = $Html -replace '\r\n', ' ' -replace '\r', ' ' -replace '\n', ' '
+    # Normalise non-breaking spaces and other Unicode spaces to regular spaces
+    $html = $html -replace '\u00A0', ' ' -replace '[\u2000-\u200B\u202F\u205F\u3000]', ' '
+    # Collapse consecutive spaces left by the above
     $html = $html -replace '[ \t]{2,}', ' '
+    $html = $html.Trim()
 
-    # Wrap in <p> only if the content isn't already block-level HTML
+    # Wrap in <p> only if not already block-level HTML
     if ($html -notmatch '(?i)^<(p|div|ul|ol|h[1-6])') {
         $html = "<p>$html</p>"
-    }
-
-    # Hard cap at 20 000 chars (DB column limit) — break cleanly on a closing tag
-    if ($html.Length -gt 19800) {
-        $cutAt = 19800
-        while ($cutAt -gt 0 -and $html[$cutAt] -ne '>') { $cutAt-- }
-        $html = $html.Substring(0, $cutAt + 1) + "<p><em>Description truncated. View full details on the source site.</em></p>"
     }
 
     return $html
