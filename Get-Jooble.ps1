@@ -618,7 +618,7 @@ foreach ($searchCountry in $CountryList) {
             sourceSite             = "jooble.org"
             externalId             = $id
             companyName            = $company
-            companyLogoUrl         = $image
+            companyLogoUrl         = if ($null -ne $image) { $image } else { "https://raw.githubusercontent.com/repasscloud/aethon-software-import-data/56a7f3995570dcb6dc69330e3908fe638f67f835/jooble/63dbbdf0d8a7bca40b8284cd_logo.svg" }
 
             title                  = $title
             description            = $description
@@ -659,9 +659,6 @@ foreach ($searchCountry in $CountryList) {
             $jobObj.PSObject.Properties.Remove('employmentType')
         }
 
-        if ($null -eq $jobObj.companyLogoUrl) {
-            $jobObj.PSObject.Properties.Remove('companyLogoUrl')
-        }
 
         [void]$transformedArr.Add($jobObj)
     }
